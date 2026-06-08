@@ -12,6 +12,8 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Imu
 from sensor_msgs.msg import JointState
+from sensor_msgs.msg import LaserScan
+from copy import deepcopy
 
 
 HOST = "0.0.0.0"
@@ -73,6 +75,19 @@ class TcpBridge(Node):
             Twist,
             "cmd_vel",
             self.cmd_vel_callback,
+            10
+        )
+
+        self.scan_pub = self.create_publisher(
+            LaserScan,
+            "scan_fixed",
+            10
+        )
+
+        self.scan_sub = self.create_subscription(
+            LaserScan,
+            "scan",
+            self.scan_callback,
             10
         )
 
@@ -153,6 +168,22 @@ class TcpBridge(Node):
                 client.close()
                 self.client_socket = None
 
+    def scan_callback(self, msg):
+
+        out = deepcopy(msg)
+
+        if out.angle_increment < 0.0:
+            out.angle_min = msg.angle_max
+            out.angle_max = msg.angle_min
+            out.angle_increment = -msg.angle_increment
+
+            out.ranges = list(reversed(msg.ranges))
+
+            if msg.intensities:
+                out.intensities = list(reversed(msg.intensities))
+
+        self.scan_pub.publish(out)
+
     def cmd_vel_callback(self, msg):
 
         if self.client_socket is None:
@@ -161,7 +192,7 @@ class TcpBridge(Node):
         try:
             # Extract linear and angular velocities for 2D scenario
             linear_vel = msg.linear.x * 400
-            angular_vel = msg.angular.z * 400
+            angular_vel = msg.angular.z * 100
 
             # Format as JSON
             payload_dict = {
@@ -174,9 +205,9 @@ class TcpBridge(Node):
                 payload.encode()
             )
 
-            self.get_logger().info(
-                f"TX: linear={linear_vel:.2f}, angular={angular_vel:.2f}"
-            )
+            # self.get_logger().info(
+            #     f"TX: linear={linear_vel:.2f}, angular={angular_vel:.2f}"
+            # )
 
         except Exception as e:
 
