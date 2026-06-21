@@ -68,7 +68,7 @@ class TcpBridge(Node):
 
         # wheel separation (meters) used to compute angular velocity from
         # left/right wheel linear speeds.
-        self.wheel_separation = 0.075
+        self.wheel_separation = 0.085
 
         # ROS subscriber
         self.cmd_vel_sub = self.create_subscription(
@@ -80,13 +80,13 @@ class TcpBridge(Node):
 
         self.scan_pub = self.create_publisher(
             LaserScan,
-            "scan_fixed",
+            "scan",
             10
         )
 
         self.scan_sub = self.create_subscription(
             LaserScan,
-            "scan",
+            "scan_raw",
             self.scan_callback,
             10
         )

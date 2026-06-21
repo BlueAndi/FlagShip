@@ -164,7 +164,7 @@
       <ros>
         <enabled>true</enabled>
         <updateRate>25</updateRate>
-        <topicName>/scan</topicName>
+        <topicName>/scan_raw</topicName>
         <alwaysOn>true</alwaysOn>
         <frameName>base_laser</frameName>
       </ros>
