@@ -27,7 +27,11 @@ def generate_launch_description() -> LaunchDescription:
         ),
         DeclareLaunchArgument(
             'slam_params_file',
-            default_value=slam_params_file,
+            default_value=os.path.join(
+                get_package_share_directory('FlagShip'),
+                'config',
+                'slam_toolbox_params.yaml'
+            ),
             description='Path to the slam_toolbox YAML parameter file.'
         ),
     ]
