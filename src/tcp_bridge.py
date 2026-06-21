@@ -10,6 +10,7 @@ from rclpy.node import Node
 
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 from sensor_msgs.msg import Imu
 from sensor_msgs.msg import JointState
 from sensor_msgs.msg import LaserScan
@@ -72,8 +73,8 @@ class TcpBridge(Node):
 
         # ROS subscriber
         self.cmd_vel_sub = self.create_subscription(
-            Twist,
-            "cmd_vel",
+            TwistStamped,      # or Twist, depending on the message type
+            "/demo/cmd_vel",
             self.cmd_vel_callback,
             10
         )
@@ -191,8 +192,8 @@ class TcpBridge(Node):
 
         try:
             # Extract linear and angular velocities for 2D scenario
-            linear_vel = msg.linear.x * 400
-            angular_vel = msg.angular.z * 100
+            linear_vel = msg.twist.linear.x * 1000
+            angular_vel = msg.twist.angular.z * 1000
 
             # Format as JSON
             payload_dict = {
