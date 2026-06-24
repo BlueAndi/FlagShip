@@ -4,47 +4,81 @@ import json
 import math
 import socket
 import threading
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import Optional
 
 import rclpy
 from rclpy.node import Node
 
-from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Twist
 from geometry_msgs.msg import TwistStamped
-from sensor_msgs.msg import Imu
-from sensor_msgs.msg import JointState
-from sensor_msgs.msg import LaserScan
-from copy import deepcopy
-
-
-HOST = "0.0.0.0"
-PORT = 8888
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import Imu, JointState, LaserScan
 
 
 LEFT_WHEEL_JOINT = "left_wheel_joint"
 RIGHT_WHEEL_JOINT = "right_wheel_joint"
-WHEEL_RADIUS = 0.018
+GYRO_SENSITIVITY_FACTOR = (
+    20.825 * 2.0 * math.pi / 360.0
+)  # mrad/s per digit
+ACCELEROMETER_SENSITIVITY_FACTOR = (
+    0.061 * 9.81
+)  # mm/s² per digit
+
+@dataclass
+class VehicleData:
+    stamp_sec: float
+    x: float
+    y: float
+    yaw: float
+    center_velocity: float
+    left_velocity: float
+    right_velocity: float
+    imu_angular_velocity_z: float
+    imu_linear_acceleration_x: float
 
 
 class TcpBridge(Node):
 
-    def __init__(self):
-
+    def __init__(self) -> None:
         super().__init__("tcp_bridge")
 
+        #
+        # Parameters
+        #
+        self.declare_parameter("host", "0.0.0.0")
+        self.declare_parameter("port", 8888)
+        self.declare_parameter("wheel_radius", 0.018)
+
+        # wheel separation (meters) used to compute angular velocity from
+        # left/right wheel linear speeds.
+        self.declare_parameter("wheel_separation", 0.075)
+        
+        self.declare_parameter("use_source_timestamp", True)
+        
         # The incoming heading is defined in the simulator's convention, which
         # is rotated relative to ROS's frame.
         self.declare_parameter("heading_offset_rad", -math.pi / 2.0)
-        self.heading_offset_rad = float(
+
+        self.host: str = self.get_parameter("host").value
+        self.port: int = self.get_parameter("port").value
+        self.wheel_radius: float = self.get_parameter("wheel_radius").value
+        self.wheel_separation: float = (
+            self.get_parameter("wheel_separation").value
+        )
+        self.use_source_timestamp: bool = (
+            self.get_parameter("use_source_timestamp").value
+        )
+        self.heading_offset_rad: float = (
             self.get_parameter("heading_offset_rad").value
         )
+
         self._heading_offset_cos = math.cos(self.heading_offset_rad)
         self._heading_offset_sin = math.sin(self.heading_offset_rad)
 
-        self.client_socket = None
-        self.declare_parameter("use_source_timestamp", True)
-
-
+        #
+        # Publishers
+        #
         self.odom_pub = self.create_publisher(
             Odometry,
             "odom",
@@ -63,25 +97,19 @@ class TcpBridge(Node):
             10
         )
 
-        self.left_wheel_position = 0.0
-        self.right_wheel_position = 0.0
-        self.last_joint_state_stamp_sec = None
-
-        # wheel separation (meters) used to compute angular velocity from
-        # left/right wheel linear speeds.
-        self.wheel_separation = 0.085
-
-        # ROS subscriber
-        self.cmd_vel_sub = self.create_subscription(
-            TwistStamped,      # or Twist, depending on the message type
-            "/demo/cmd_vel",
-            self.cmd_vel_callback,
-            10
-        )
-
         self.scan_pub = self.create_publisher(
             LaserScan,
             "scan",
+            10
+        )
+
+        #
+        # Subscribers
+        #
+        self.cmd_vel_sub = self.create_subscription(
+            TwistStamped,
+            "/cmd_vel",
+            self.cmd_vel_callback,
             10
         )
 
@@ -92,15 +120,29 @@ class TcpBridge(Node):
             10
         )
 
-        # Start TCP server thread
+        #
+        # State
+        #
+        self.client_socket: Optional[socket.socket] = None
+        self.socket_lock = threading.Lock()
+
+        self.left_wheel_position = 0.0
+        self.right_wheel_position = 0.0
+        self.last_joint_state_stamp_sec: Optional[float] = None
+
+        #
+        # TCP server thread
+        #
         self.server_thread = threading.Thread(
             target=self.server_loop,
             daemon=True
         )
-
         self.server_thread.start()
 
-    def server_loop(self):
+    #
+    # TCP server
+    #
+    def server_loop(self) -> None:
 
         server = socket.socket(
             socket.AF_INET,
@@ -113,27 +155,32 @@ class TcpBridge(Node):
             1
         )
 
-        server.bind((HOST, PORT))
+        server.bind(
+            (self.host, self.port)
+        )
+
         server.listen(1)
 
         self.get_logger().info(
-            f"TCP server listening on {PORT}"
+            f"TCP server listening on {self.port}"
         )
 
         while rclpy.ok():
 
             client, addr = server.accept()
 
-            self.client_socket = client
+            with self.socket_lock:
+                self.client_socket = client
 
             self.get_logger().info(
                 f"Client connected: {addr}"
             )
 
-            try:
-                buffer = ""
+            buffer = ""
 
+            try:
                 while True:
+
                     data = client.recv(1024)
 
                     if not data:
@@ -141,24 +188,23 @@ class TcpBridge(Node):
 
                     buffer += data.decode()
 
-                    # newline framed packets
                     while "\n" in buffer:
-                        line, buffer = buffer.split("\n", 1)
+
+                        line, buffer = buffer.split(
+                            "\n",
+                            1
+                        )
 
                         line = line.strip()
 
-                        if not line:
-                            continue
+                        if line:
+                            self.process_vehicle_line(line)
 
-                        # self.get_logger().info(
-                        #     f"RX: {line}"
-                        # )
+            except OSError as exc:
 
-                        self.publish_vehicle_odometry(line)
-
-            except Exception as e:
-
-                self.get_logger().error(str(e))
+                self.get_logger().error(
+                    f"Socket error: {exc}"
+                )
 
             finally:
 
@@ -167,120 +213,184 @@ class TcpBridge(Node):
                 )
 
                 client.close()
-                self.client_socket = None
 
-    def scan_callback(self, msg):
+                with self.socket_lock:
+                    self.client_socket = None
+
+    #
+    # Scan callback
+    #
+    def scan_callback(
+        self,
+        msg: LaserScan
+    ) -> None:
 
         out = deepcopy(msg)
 
         if out.angle_increment < 0.0:
+
             out.angle_min = msg.angle_max
             out.angle_max = msg.angle_min
             out.angle_increment = -msg.angle_increment
 
-            out.ranges = list(reversed(msg.ranges))
+            out.ranges = list(
+                reversed(msg.ranges)
+            )
 
             if msg.intensities:
-                out.intensities = list(reversed(msg.intensities))
+                out.intensities = list(
+                    reversed(msg.intensities)
+                )
 
         self.scan_pub.publish(out)
 
-    def cmd_vel_callback(self, msg):
+    #
+    # cmd_vel callback
+    #
+    def cmd_vel_callback(
+        self,
+        msg: TwistStamped
+    ) -> None:
 
-        if self.client_socket is None:
+        with self.socket_lock:
+            sock = self.client_socket
+
+        if sock is None:
             return
 
-        try:
-            # Extract linear and angular velocities for 2D scenario
-            linear_vel = msg.twist.linear.x * 1000
-            angular_vel = msg.twist.angular.z * 1000
-
-            # Format as JSON
-            payload_dict = {
-                "linear": linear_vel,
-                "angular": angular_vel
+        payload = json.dumps(
+            {
+                "linear": msg.twist.linear.x * 1000.0,
+                "angular": msg.twist.angular.z * 1000.0
             }
-            payload = json.dumps(payload_dict) + "\n"
+        ) + "\n"
 
-            self.client_socket.sendall(
+        try:
+            sock.sendall(
                 payload.encode()
             )
 
-            # self.get_logger().info(
-            #     f"TX: linear={linear_vel:.2f}, angular={angular_vel:.2f}"
-            # )
+        except OSError as exc:
+            self.get_logger().error(
+                f"Send failed: {exc}"
+            )
 
-        except Exception as e:
+    #
+    # Packet processing
+    #
+    def process_vehicle_line(
+        self,
+        line: str
+    ) -> None:
 
-            self.get_logger().error(str(e))
+        data = self.parse_vehicle_payload(
+            line
+        )
 
-    def publish_vehicle_odometry(self, line):
+        if data is None:
+            return
+
+        self.publish_odom(data)
+        self.publish_imu(data)
+        self.publish_joint_states(data)
+
+    def parse_vehicle_payload(
+        self,
+        line: str
+    ) -> Optional[VehicleData]:
 
         try:
-
             payload = json.loads(line)
 
         except json.JSONDecodeError:
-
-            return
+            return None
 
         if payload.get("type") != "vehicle_data":
-
-            return
+            return None
 
         try:
-            x_pos = float(payload["x"]) / 1000.0
-            y_pos = float(payload["y"]) / 1000.0
-            stamp_sec = float(payload["t"]) / 1000.0
-            yaw = float(payload["h"])
-            center_velocity = float(payload["c"]) / 1000.0
-            left_velocity = float(payload["l"]) / 1000.0
-            right_velocity = float(payload["r"]) / 1000.0
-            imu_angular_velocity_z = float(payload.get("tz", 0.0)) / 1000.0
-            imu_linear_acceleration_x = float(payload.get("ax", 0.0)) / 1000.0
+
+            # Source packets use millimeters and milliradians.
+            # All values are converted to SI units inside parse_vehicle_payload().
+            return VehicleData(
+                stamp_sec=float(payload["t"]) / 1000.0,
+                x=float(payload["x"]) / 1000.0,
+                y=float(payload["y"]) / 1000.0,
+                yaw=float(payload["h"]) / 1000.0,
+                center_velocity=float(payload["c"]) / 1000.0,
+                left_velocity=float(payload["l"]) / 1000.0,
+                right_velocity=float(payload["r"]) / 1000.0,
+                imu_angular_velocity_z=(float(payload.get("tz", 0.0)) * GYRO_SENSITIVITY_FACTOR / 1000.0),
+                imu_linear_acceleration_x=(float(payload.get("ax", 0.0)) * ACCELEROMETER_SENSITIVITY_FACTOR / 1000.0)
+            )
 
         except (KeyError, TypeError, ValueError) as exc:
 
             self.get_logger().warn(
-                f"Ignoring malformed vehicle_data payload: {exc}"
+                f"Ignoring malformed packet: {exc}"
             )
-            return
+
+            return None
+
+    #
+    # Publishers
+    #
+    def publish_odom(
+        self,
+        data: VehicleData
+    ) -> None:
 
         odom = Odometry()
-        if self.get_parameter("use_source_timestamp").value:
-            odom.header.stamp = rclpy.time.Time(seconds=stamp_sec).to_msg()
+
+        if self.use_source_timestamp:
+            odom.header.stamp = (
+                rclpy.time.Time(
+                    seconds=data.stamp_sec
+                ).to_msg()
+            )
         else:
-            odom.header.stamp = self.get_clock().now().to_msg()
+            odom.header.stamp = (
+                self.get_clock().now().to_msg()
+            )
+
         odom.header.frame_id = "odom"
-        odom.child_frame_id = "base_footprint"
+        odom.child_frame_id = "base_link"
 
-        # Rotate source coordinates into the ROS odom frame.
         odom.pose.pose.position.x = (
-            x_pos * self._heading_offset_cos - y_pos * self._heading_offset_sin
+            data.x * self._heading_offset_cos
+            - data.y * self._heading_offset_sin
         )
+
         odom.pose.pose.position.y = (
-            x_pos * self._heading_offset_sin + y_pos * self._heading_offset_cos
+            data.x * self._heading_offset_sin
+            + data.y * self._heading_offset_cos
         )
-        odom.pose.pose.position.z = 0.0
 
-        # Convert heading from milliradians to radians and align it with ROS.
-        yaw = (yaw / 1000.0) + self.heading_offset_rad
+        yaw = data.yaw + self.heading_offset_rad
 
-        odom.pose.pose.orientation.z = math.sin(yaw * 0.5)
-        odom.pose.pose.orientation.w = math.cos(yaw * 0.5)
+        odom.pose.pose.orientation.z = (
+            math.sin(yaw * 0.5)
+        )
+
+        odom.pose.pose.orientation.w = (
+            math.cos(yaw * 0.5)
+        )
 
         odom.pose.covariance = [0.0] * 36
-        odom.pose.covariance[0] = 1e-3  # variance on x (m^2)
-        odom.pose.covariance[7] = 1e-3  # variance on y (m^2)
-        odom.pose.covariance[35] = 1e-2  # variance on yaw (rad^2)
+        odom.pose.covariance[0] = 1e-3
+        odom.pose.covariance[7] = 1e-3
+        odom.pose.covariance[35] = 1e-2
 
-        odom.twist.twist.linear.x = center_velocity
-        odom.twist.twist.linear.y = 0.0
-        odom.twist.twist.linear.z = 0.0
-        odom.twist.twist.angular.x = 0.0
-        odom.twist.twist.angular.y = 0.0
+        odom.twist.twist.linear.x = (
+            data.center_velocity
+        )
+
         odom.twist.twist.angular.z = (
-            (right_velocity - left_velocity) / float(self.wheel_separation)
+            (
+                data.right_velocity
+                - data.left_velocity
+            )
+            / self.wheel_separation
         )
 
         odom.twist.covariance = [0.0] * 36
@@ -288,85 +398,148 @@ class TcpBridge(Node):
         odom.twist.covariance[7] = -1.0
         odom.twist.covariance[35] = 1e-2
 
-        self.odom_pub.publish(odom)
-
-        self.publish_wheel_joint_states(
-            stamp_sec,
-            left_velocity,
-            right_velocity
+        self.odom_pub.publish(
+            odom
         )
 
-        try:
-            imu = Imu()
-            imu.header.stamp = odom.header.stamp
-            imu.header.frame_id = "base_imu"
-            imu.angular_velocity.x = 0.0
-            imu.angular_velocity.y = 0.0
-            imu.angular_velocity.z = imu_angular_velocity_z
-            imu.linear_acceleration.x = imu_linear_acceleration_x
-            imu.linear_acceleration.y = 0.0
-            imu.linear_acceleration.z = 0.0
-            imu.orientation_covariance = [ -1.0, 0.0, 0.0,
-                                           0.0, -1.0, 0.0,
-                                           0.0, 0.0, -1.0 ]
-            imu.angular_velocity_covariance = [1e-3, 0.0, 0.0,
-                                               0.0, 1e-3, 0.0,
-                                               0.0, 0.0, 1e-3]
-            imu.linear_acceleration_covariance = [1e-2, 0.0, 0.0,
-                                                 0.0, 1e-2, 0.0,
-                                                 0.0, 0.0, 1e-2]
-            self.imu_pub.publish(imu)
-        except Exception as e:
-            self.get_logger().warn(f"Failed to publish IMU: {e}")
-
-    def publish_wheel_joint_states(
+    def publish_imu(
         self,
-        stamp_sec,
-        left_wheel_linear_velocity,
-        right_wheel_linear_velocity
-    ):
+        data: VehicleData
+    ) -> None:
+
+        imu = Imu()
+
+        if self.use_source_timestamp:
+            imu.header.stamp = (
+                rclpy.time.Time(
+                    seconds=data.stamp_sec
+                ).to_msg()
+            )
+        else:
+            imu.header.stamp = (
+                self.get_clock().now().to_msg()
+            )
+
+        imu.header.frame_id = "base_imu"
+
+        imu.angular_velocity.z = (
+            data.imu_angular_velocity_z
+        )
+
+        imu.linear_acceleration.x = (
+            data.imu_linear_acceleration_x
+        )
+
+        imu.orientation_covariance = [
+            -1.0, 0.0, 0.0,
+            0.0, -1.0, 0.0,
+            0.0, 0.0, -1.0
+        ]
+
+        imu.angular_velocity_covariance = [
+            1e-3, 0.0, 0.0,
+            0.0, 1e-3, 0.0,
+            0.0, 0.0, 1e-3
+        ]
+
+        imu.linear_acceleration_covariance = [
+            1e-2, 0.0, 0.0,
+            0.0, 1e-2, 0.0,
+            0.0, 0.0, 1e-2
+        ]
+
+        self.imu_pub.publish(
+            imu
+        )
+
+    def publish_joint_states(
+        self,
+        data: VehicleData
+    ) -> None:
 
         if self.last_joint_state_stamp_sec is None:
             dt = 0.0
         else:
-            dt = stamp_sec - self.last_joint_state_stamp_sec
-            if dt < 0.0:
-                dt = 0.0
+            dt = (
+                data.stamp_sec
+                - self.last_joint_state_stamp_sec
+            )
 
-        self.last_joint_state_stamp_sec = stamp_sec
+            dt = max(
+                dt,
+                0.0
+            )
 
-        left_wheel_angular_velocity = left_wheel_linear_velocity / WHEEL_RADIUS
-        right_wheel_angular_velocity = right_wheel_linear_velocity / WHEEL_RADIUS
+        self.last_joint_state_stamp_sec = (
+            data.stamp_sec
+        )
 
-        self.left_wheel_position += left_wheel_angular_velocity * dt
-        self.right_wheel_position += right_wheel_angular_velocity * dt
+        left_wheel_angular_velocity = (
+            data.left_velocity
+            / self.wheel_radius
+        )
+
+        right_wheel_angular_velocity = (
+            data.right_velocity
+            / self.wheel_radius
+        )
+
+        self.left_wheel_position += (
+            left_wheel_angular_velocity
+            * dt
+        )
+
+        self.right_wheel_position += (
+            right_wheel_angular_velocity
+            * dt
+        )
 
         joint_state = JointState()
-        joint_state.header.stamp = self.get_clock().now().to_msg()
-        joint_state.name = [LEFT_WHEEL_JOINT, RIGHT_WHEEL_JOINT]
+
+        joint_state.header.stamp = (
+            self.get_clock().now().to_msg()
+        )
+
+        joint_state.name = [
+            LEFT_WHEEL_JOINT,
+            RIGHT_WHEEL_JOINT
+        ]
+
         joint_state.position = [
             self.left_wheel_position,
-            self.right_wheel_position,
+            self.right_wheel_position
         ]
+
         joint_state.velocity = [
             left_wheel_angular_velocity,
-            right_wheel_angular_velocity,
+            right_wheel_angular_velocity
         ]
 
-        self.joint_state_pub.publish(joint_state)
+        self.joint_state_pub.publish(
+            joint_state
+        )
 
 
-def main(args=None):
+def main(
+    args=None
+) -> None:
 
-    rclpy.init(args=args)
+    rclpy.init(
+        args=args
+    )
 
     node = TcpBridge()
 
-    rclpy.spin(node)
+    try:
+        rclpy.spin(
+            node
+        )
 
-    node.destroy_node()
+    finally:
 
-    rclpy.shutdown()
+        node.destroy_node()
+
+        rclpy.shutdown()
 
 
 if __name__ == "__main__":
