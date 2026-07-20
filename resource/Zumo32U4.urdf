@@ -160,10 +160,10 @@
   </joint>
 
   <webots>
-    <device reference="base_laser" type="Lidar">
+    <device reference="lidar" type="Lidar">
       <ros>
         <enabled>true</enabled>
-        <updateRate>25</updateRate>
+        <updateRate>8</updateRate>
         <topicName>/scan_raw</topicName>
         <alwaysOn>true</alwaysOn>
         <frameName>base_laser</frameName>
