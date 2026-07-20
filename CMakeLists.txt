@@ -33,6 +33,7 @@ install(DIRECTORY
   config
   launch
   resource
+  rviz
   DESTINATION share/${PROJECT_NAME}/
 )
 
