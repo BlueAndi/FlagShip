@@ -1,9 +1,10 @@
+#!/usr/bin/env python3
 """Launch only TCP bridge and standalone LiDAR Webots controller."""
 
 import os
+from typing import List
 
 from ament_index_python.packages import get_package_share_directory
-
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.launch_description_entity import LaunchDescriptionEntity
@@ -14,60 +15,51 @@ from webots_ros2_driver.webots_controller import WebotsController
 from webots_ros2_driver.webots_launcher import Ros2SupervisorLauncher
 
 
-def _arg_to_bool(arg):
+def _arg_to_bool(arg: str) -> bool:
+    """Convert common string representations of booleans to actual bools."""
     if isinstance(arg, bool):
         return arg
-
-    if arg.lower() in ('true', 'yes', '1', 'ok'):
-        return True
-
-    return False
+    return arg.lower() in ('true', 'yes', '1', 'ok')
 
 
-def _launch_setup(context) -> list[LaunchDescriptionEntity]:
-    """Create runtime launch actions with resolved arguments."""
+def _launch_setup(context) -> List[LaunchDescriptionEntity]:
+    """Resolve launch configurations and build the list of launch actions."""
     use_sim_time = LaunchConfiguration('use_sim_time').perform(context).lower() == 'true'
     lidar_robot_name = LaunchConfiguration('lidar_robot_name').perform(context)
     webots_port = LaunchConfiguration('webots_port').perform(context)
-    webots_ip = LaunchConfiguration('webots_ip').perform(context) or None
+    lidar_description = LaunchConfiguration('lidar_description').perform(context)
     launch_supervisor = _arg_to_bool(LaunchConfiguration('launch_supervisor').perform(context))
     launch_ekf = _arg_to_bool(LaunchConfiguration('launch_ekf').perform(context))
     publish_zumo_tf = _arg_to_bool(LaunchConfiguration('publish_zumo_tf').perform(context))
+
+    actions = []
 
     tcp_bridge = Node(
         package='FlagShip',
         executable='tcp_bridge.py',
         name='tcp_bridge',
         output='screen',
-        parameters=[
-            {'use_sim_time': use_sim_time}
-        ]
+        parameters=[{'use_sim_time': use_sim_time}]
     )
+    actions.append(tcp_bridge)
 
-    lidar_description = LaunchConfiguration('lidar_description').perform(context)
     lidar_controller = WebotsController(
         robot_name=lidar_robot_name,
         port=webots_port,
-        ip_address=webots_ip,
         parameters=[
             {'robot_description': lidar_description},
             {'use_sim_time': use_sim_time}
         ]
     )
-
-    actions = [tcp_bridge]
+    actions.append(lidar_controller)
 
     if launch_supervisor:
         actions.append(
-            Ros2SupervisorLauncher(
-                port=webots_port,
-                ip_address=webots_ip
-            )
+            Ros2SupervisorLauncher(port=webots_port)
         )
 
-    actions.append(lidar_controller)
-
     if launch_ekf:
+        ekf_config = LaunchConfiguration('ekf_config').perform(context)
         actions.append(
             Node(
                 package='robot_localization',
@@ -75,7 +67,7 @@ def _launch_setup(context) -> list[LaunchDescriptionEntity]:
                 name='ekf_filter_node',
                 output='screen',
                 parameters=[
-                    LaunchConfiguration('ekf_config').perform(context),
+                    ekf_config,
                     {'use_sim_time': use_sim_time}
                 ]
             )
@@ -109,39 +101,23 @@ def _launch_setup(context) -> list[LaunchDescriptionEntity]:
 
 
 def generate_launch_description() -> LaunchDescription:
-    """Create launch description for bridge + LiDAR controller only."""
-    lidar_description_default = os.path.join(
-        get_package_share_directory('FlagShip'),
-        'resource',
-        'lidar_webots.urdf'
-    )
-
-    ekf_config_default = os.path.join(
-        get_package_share_directory('FlagShip'),
-        'config',
-        'ekf.yaml'
-    )
+    """Create launch description exposing user-configurable arguments."""
+    pkg_share = get_package_share_directory('FlagShip')
+    
+    # Define default file paths
+    zumo_urdf_default = os.path.join(pkg_share, 'resource', 'Zumo32U4.urdf')
+    ekf_config_default = os.path.join(pkg_share, 'config', 'ekf.yaml')
 
     launch_args = [
         DeclareLaunchArgument(
+            'use_sim_time',
+            default_value='true',
+            description='Flag to enable use_sim_time.'
+        ),
+        DeclareLaunchArgument(
             'lidar_robot_name',
             default_value='FlagShip',
-            description='Name of standalone Webots Robot node for native ROS2 LiDAR.'
-        ),
-        DeclareLaunchArgument(
-            'lidar_description',
-            default_value=lidar_description_default,
-            description='Path to URDF defining ROS2 LiDAR device mapping.'
-        ),
-        DeclareLaunchArgument(
-            'publish_zumo_tf',
-            default_value='true',
-            description='Enable/disable TF publishing for Zumo tree via robot_state_publisher.'
-        ),
-        DeclareLaunchArgument(
-            'launch_supervisor',
-            default_value='true',
-            description='Enable/disable the Ros2Supervisor node that publishes /clock.'
+            description='Name of standalone Webots Robot node for native ROS 2 LiDAR.'
         ),
         DeclareLaunchArgument(
             'webots_port',
@@ -149,9 +125,9 @@ def generate_launch_description() -> LaunchDescription:
             description='Webots controller port used by the standalone LiDAR robot.'
         ),
         DeclareLaunchArgument(
-            'webots_ip',
-            default_value='',
-            description='Webots controller IP address used by the standalone LiDAR robot.'
+            'launch_supervisor',
+            default_value='true',
+            description='Enable/disable the Ros2Supervisor node that publishes /clock.'
         ),
         DeclareLaunchArgument(
             'launch_ekf',
@@ -164,9 +140,14 @@ def generate_launch_description() -> LaunchDescription:
             description='Path to robot_localization EKF parameter file.'
         ),
         DeclareLaunchArgument(
-            'use_sim_time',
+            'publish_zumo_tf',
             default_value='true',
-            description='Flag to enable use_sim_time.'
+            description='Enable/disable TF publishing for Zumo tree via robot_state_publisher.'
+        ),
+        DeclareLaunchArgument(
+            'lidar_description',
+            default_value=zumo_urdf_default,
+            description='Path to URDF defining ROS 2 LiDAR device mapping.'
         ),
     ]
 
