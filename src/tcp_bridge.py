@@ -21,6 +21,36 @@ RIGHT_WHEEL_JOINT = "right_wheel_joint"
 GYRO_SENSITIVITY_FACTOR = (17.5 * math.pi / 180.0)  # mrad/s per digit (LSM6DS33 at ±500 dps range → 17.5 mrad/s per digit)
 ACCELEROMETER_SENSITIVITY_FACTOR = (0.061 * 9.81)  # mm/s² per digit
 
+# TCP settings
+TCP_RECEIVE_BUFFER_SIZE = 1024
+
+# Unit conversion: vehicle protocol uses millimetres and milliradians
+MILLI_TO_SI = 1000.0
+
+# Covariance matrix sizes and diagonal indices
+COVARIANCE_6_SIZE = 36         # 6×6 matrix flattened
+COVARIANCE_6_INDEX_X   = 0     # (0, 0)
+COVARIANCE_6_INDEX_Y   = 7     # (1, 1)
+COVARIANCE_6_INDEX_YAW = 35    # (5, 5)
+
+# Odometry covariance values
+ODOM_POSE_COVARIANCE_XY = 4e-2
+ODOM_POSE_COVARIANCE_YAW = 1e4
+ODOM_TWIST_COVARIANCE_LINEAR_X = 1e-2
+ODOM_TWIST_COVARIANCE_LINEAR_Y = 1e6
+ODOM_TWIST_COVARIANCE_ANGULAR_Z = 10.0
+
+# IMU covariance values
+IMU_ORIENTATION_COVARIANCE_X = 1e6
+IMU_ORIENTATION_COVARIANCE_Y = 1e6
+IMU_ORIENTATION_COVARIANCE_Z = 1e-4
+IMU_ANGULAR_VELOCITY_COVARIANCE_X = 1e6
+IMU_ANGULAR_VELOCITY_COVARIANCE_Y = 1e6
+IMU_ANGULAR_VELOCITY_COVARIANCE_Z = 1e-4
+IMU_LINEAR_ACCELERATION_COVARIANCE_X = 1e-2
+IMU_LINEAR_ACCELERATION_COVARIANCE_Y = 1e6
+IMU_LINEAR_ACCELERATION_COVARIANCE_Z = 1e6
+
 @dataclass
 class VehicleData:
     stamp_sec: float
@@ -117,7 +147,7 @@ class TcpBridge(Node):
             try:
                 while True:
 
-                    data = client.recv(1024)
+                    data = client.recv(TCP_RECEIVE_BUFFER_SIZE)
                     if not data:
                         break
 
@@ -174,8 +204,8 @@ class TcpBridge(Node):
 
         payload = json.dumps(
             {
-                "linear": msg.twist.linear.x * 1000.0,
-                "angular": msg.twist.angular.z * 1000.0
+                "linear": msg.twist.linear.x * MILLI_TO_SI,
+                "angular": msg.twist.angular.z * MILLI_TO_SI
             }
         ) + "\n"
 
@@ -211,15 +241,15 @@ class TcpBridge(Node):
             # Source packets use millimeters and milliradians.
             # All values are converted to SI units.
             return VehicleData(
-                stamp_sec=float(payload["t"]) / 1000.0,
-                x=float(payload["x"]) / 1000.0,
-                y=float(payload["y"]) / 1000.0,
-                yaw=float(payload["h"]) / 1000.0,
-                center_velocity=float(payload["c"]) / 1000.0,
-                left_velocity=float(payload["l"]) / 1000.0,
-                right_velocity=float(payload["r"]) / 1000.0,
-                imu_angular_velocity_z=(float(payload.get("tz", 0.0)) * GYRO_SENSITIVITY_FACTOR / 1000.0),
-                imu_linear_acceleration_x=(float(payload.get("ax", 0.0)) * ACCELEROMETER_SENSITIVITY_FACTOR / 1000.0)
+                stamp_sec=float(payload["t"]) / MILLI_TO_SI,
+                x=float(payload["x"]) / MILLI_TO_SI,
+                y=float(payload["y"]) / MILLI_TO_SI,
+                yaw=float(payload["h"]) / MILLI_TO_SI,
+                center_velocity=float(payload["c"]) / MILLI_TO_SI,
+                left_velocity=float(payload["l"]) / MILLI_TO_SI,
+                right_velocity=float(payload["r"]) / MILLI_TO_SI,
+                imu_angular_velocity_z=(float(payload.get("tz", 0.0)) * GYRO_SENSITIVITY_FACTOR / MILLI_TO_SI),
+                imu_linear_acceleration_x=(float(payload.get("ax", 0.0)) * ACCELEROMETER_SENSITIVITY_FACTOR / MILLI_TO_SI)
             )
         except (KeyError, TypeError, ValueError) as exc:
             self.get_logger().warn(f"Ignoring malformed packet: {exc}")
@@ -241,19 +271,19 @@ class TcpBridge(Node):
 
         odom.pose.pose.orientation.w = (math.cos(yaw * 0.5))
 
-        odom.pose.covariance = [0.0] * 36
-        odom.pose.covariance[0] = 4e-2
-        odom.pose.covariance[7] = 4e-2
-        odom.pose.covariance[35] = 1e4
+        odom.pose.covariance = [0.0] * COVARIANCE_6_SIZE
+        odom.pose.covariance[COVARIANCE_6_INDEX_X]   = ODOM_POSE_COVARIANCE_XY
+        odom.pose.covariance[COVARIANCE_6_INDEX_Y]   = ODOM_POSE_COVARIANCE_XY
+        odom.pose.covariance[COVARIANCE_6_INDEX_YAW] = ODOM_POSE_COVARIANCE_YAW
 
         odom.twist.twist.linear.x = (data.center_velocity)
 
         odom.twist.twist.angular.z = ((data.right_velocity - data.left_velocity) / self.wheel_separation)
 
-        odom.twist.covariance = [0.0] * 36
-        odom.twist.covariance[0] = 1e-2
-        odom.twist.covariance[7] = 10000000
-        odom.twist.covariance[35] = 10
+        odom.twist.covariance = [0.0] * COVARIANCE_6_SIZE
+        odom.twist.covariance[COVARIANCE_6_INDEX_X]   = ODOM_TWIST_COVARIANCE_LINEAR_X
+        odom.twist.covariance[COVARIANCE_6_INDEX_Y]   = ODOM_TWIST_COVARIANCE_LINEAR_Y
+        odom.twist.covariance[COVARIANCE_6_INDEX_YAW] = ODOM_TWIST_COVARIANCE_ANGULAR_Z
 
         self.odom_pub.publish(odom)
 
@@ -268,21 +298,21 @@ class TcpBridge(Node):
         imu.linear_acceleration.x = (data.imu_linear_acceleration_x)
 
         imu.orientation_covariance = [
-            1e6, 0.0, 0.0,
-            0.0, 1e6, 0.0,
-            0.0, 0.0, 1e-4
+            IMU_ORIENTATION_COVARIANCE_X, 0.0, 0.0,
+            0.0, IMU_ORIENTATION_COVARIANCE_Y, 0.0,
+            0.0, 0.0, IMU_ORIENTATION_COVARIANCE_Z
         ]
 
         imu.angular_velocity_covariance = [
-            1e6, 0.0, 0.0,
-            0.0, 1e6, 0.0,
-            0.0, 0.0, 1e-4
+            IMU_ANGULAR_VELOCITY_COVARIANCE_X, 0.0, 0.0,
+            0.0, IMU_ANGULAR_VELOCITY_COVARIANCE_Y, 0.0,
+            0.0, 0.0, IMU_ANGULAR_VELOCITY_COVARIANCE_Z
         ]
 
         imu.linear_acceleration_covariance = [
-            1e-2, 0.0, 0.0,
-            0.0, 1e-2, 0.0,
-            0.0, 0.0, 1
+            IMU_LINEAR_ACCELERATION_COVARIANCE_X, 0.0, 0.0,
+            0.0, IMU_LINEAR_ACCELERATION_COVARIANCE_Y, 0.0,
+            0.0, 0.0, IMU_LINEAR_ACCELERATION_COVARIANCE_Z
         ]
 
         self.imu_pub.publish(imu)
