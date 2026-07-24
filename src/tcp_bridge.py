@@ -18,9 +18,9 @@ from sensor_msgs.msg import Imu, JointState, LaserScan
 
 LEFT_WHEEL_JOINT = "left_wheel_joint"
 RIGHT_WHEEL_JOINT = "right_wheel_joint"
-# mrad/s per digit (LSM6DS33 at ±500 dps range → 17.5 mrad/s per digit)
+# rad/s per digit (LSM6DS33 at ±500 dps range → 17.5 rad/s per digit)
 GYRO_SENSITIVITY_FACTOR = (17.5 * math.pi / 180.0)
-ACCELEROMETER_SENSITIVITY_FACTOR = (0.061 * 9.81)  # mm/s² per digit
+ACCELEROMETER_SENSITIVITY_FACTOR = (0.061 * 9.81)  # m/s² per digit
 
 # TCP settings
 TCP_RECEIVE_BUFFER_SIZE = 1024
@@ -265,7 +265,7 @@ class TcpBridge(Node):
     def publish_odom(self, data: VehicleData) -> None:
 
         odom = Odometry()
-        odom.header.stamp = (rclpy.time.Time(seconds=data.stamp_sec).to_msg())
+        odom.header.stamp = rclpy.time.Time(seconds=data.stamp_sec).to_msg()
         odom.header.frame_id = "odom"
         odom.child_frame_id = "base_link"
 
@@ -273,16 +273,16 @@ class TcpBridge(Node):
         odom.pose.pose.position.y = data.y
 
         yaw = data.yaw
-        odom.pose.pose.orientation.z = (math.sin(yaw * 0.5))
+        odom.pose.pose.orientation.z = math.sin(yaw * 0.5)
 
-        odom.pose.pose.orientation.w = (math.cos(yaw * 0.5))
+        odom.pose.pose.orientation.w = math.cos(yaw * 0.5)
 
         odom.pose.covariance = [0.0] * COVARIANCE_6_SIZE
         odom.pose.covariance[COVARIANCE_6_INDEX_X] = ODOM_POSE_COVARIANCE_XY
         odom.pose.covariance[COVARIANCE_6_INDEX_Y] = ODOM_POSE_COVARIANCE_XY
         odom.pose.covariance[COVARIANCE_6_INDEX_YAW] = ODOM_POSE_COVARIANCE_YAW
 
-        odom.twist.twist.linear.x = (data.center_velocity)
+        odom.twist.twist.linear.x = data.center_velocity
 
         odom.twist.twist.angular.z = (
             (data.right_velocity - data.left_velocity) / self.wheel_separation)
@@ -297,12 +297,12 @@ class TcpBridge(Node):
     def publish_imu(self, data: VehicleData) -> None:
 
         imu = Imu()
-        imu.header.stamp = (rclpy.time.Time(seconds=data.stamp_sec).to_msg())
+        imu.header.stamp = rclpy.time.Time(seconds=data.stamp_sec).to_msg()
         imu.header.frame_id = "base_imu"
 
-        imu.angular_velocity.z = (data.imu_angular_velocity_z)
+        imu.angular_velocity.z = data.imu_angular_velocity_z
 
-        imu.linear_acceleration.x = (data.imu_linear_acceleration_x)
+        imu.linear_acceleration.x = data.imu_linear_acceleration_x
 
         imu.orientation_covariance = [
             IMU_ORIENTATION_COVARIANCE_X, 0.0, 0.0,
@@ -329,23 +329,22 @@ class TcpBridge(Node):
         if self.last_joint_state_stamp_sec is None:
             dt = 0.0
         else:
-            dt = (data.stamp_sec - self.last_joint_state_stamp_sec)
+            dt = data.stamp_sec - self.last_joint_state_stamp_sec
 
             dt = max(dt, 0.0)
 
-        self.last_joint_state_stamp_sec = (data.stamp_sec)
+        self.last_joint_state_stamp_sec = data.stamp_sec
 
-        left_wheel_angular_velocity = (data.left_velocity / self.wheel_radius)
-        right_wheel_angular_velocity = (
-            data.right_velocity / self.wheel_radius)
+        left_wheel_angular_velocity = data.left_velocity / self.wheel_radius
+        right_wheel_angular_velocity = data.right_velocity / self.wheel_radius
 
-        self.left_wheel_position += (left_wheel_angular_velocity * dt)
+        self.left_wheel_position += left_wheel_angular_velocity * dt
 
-        self.right_wheel_position += (right_wheel_angular_velocity * dt)
+        self.right_wheel_position += right_wheel_angular_velocity * dt
 
         joint_state = JointState()
 
-        joint_state.header.stamp = (self.get_clock().now().to_msg())
+        joint_state.header.stamp = self.get_clock().now().to_msg()
 
         joint_state.name = [LEFT_WHEEL_JOINT, RIGHT_WHEEL_JOINT]
 
