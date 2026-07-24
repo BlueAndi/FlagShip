@@ -1,1 +1,0 @@
-This folder is for storing of additional collateral.
