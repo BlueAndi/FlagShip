@@ -18,7 +18,8 @@ from sensor_msgs.msg import Imu, JointState, LaserScan
 
 LEFT_WHEEL_JOINT = "left_wheel_joint"
 RIGHT_WHEEL_JOINT = "right_wheel_joint"
-GYRO_SENSITIVITY_FACTOR = (17.5 * math.pi / 180.0)  # mrad/s per digit (LSM6DS33 at ±500 dps range → 17.5 mrad/s per digit)
+# mrad/s per digit (LSM6DS33 at ±500 dps range → 17.5 mrad/s per digit)
+GYRO_SENSITIVITY_FACTOR = (17.5 * math.pi / 180.0)
 ACCELEROMETER_SENSITIVITY_FACTOR = (0.061 * 9.81)  # mm/s² per digit
 
 # TCP settings
@@ -29,8 +30,8 @@ MILLI_TO_SI = 1000.0
 
 # Covariance matrix sizes and diagonal indices
 COVARIANCE_6_SIZE = 36         # 6×6 matrix flattened
-COVARIANCE_6_INDEX_X   = 0     # (0, 0)
-COVARIANCE_6_INDEX_Y   = 7     # (1, 1)
+COVARIANCE_6_INDEX_X = 0     # (0, 0)
+COVARIANCE_6_INDEX_Y = 7     # (1, 1)
 COVARIANCE_6_INDEX_YAW = 35    # (5, 5)
 
 # Odometry covariance values
@@ -50,6 +51,7 @@ IMU_ANGULAR_VELOCITY_COVARIANCE_Z = 1e-4
 IMU_LINEAR_ACCELERATION_COVARIANCE_X = 1e-2
 IMU_LINEAR_ACCELERATION_COVARIANCE_Y = 1e6
 IMU_LINEAR_ACCELERATION_COVARIANCE_Z = 1e6
+
 
 @dataclass
 class VehicleData:
@@ -72,10 +74,11 @@ class TcpBridge(Node):
         # Parameters
         self.host: str = self.declare_parameter("host", "0.0.0.0").value
         self.port: int = self.declare_parameter("port", 8888).value
-        self.wheel_radius: float = self.declare_parameter("wheel_radius", 0.018).value
-        self.wheel_separation: float = self.declare_parameter("wheel_separation", 0.075).value
-        self.use_source_timestamp: bool = self.declare_parameter("use_source_timestamp", True).value
-        
+        self.wheel_radius: float = self.declare_parameter(
+            "wheel_radius", 0.018).value
+        self.wheel_separation: float = self.declare_parameter(
+            "wheel_separation", 0.075).value
+
         # Publishers
         self.odom_pub = self.create_publisher(
             Odometry,
@@ -121,7 +124,8 @@ class TcpBridge(Node):
         self.last_joint_state_stamp_sec: Optional[float] = None
 
         # TCP server thread
-        self.server_thread = threading.Thread(target=self.server_loop, daemon=True)
+        self.server_thread = threading.Thread(
+            target=self.server_loop, daemon=True)
         self.server_thread.start()
 
     # TCP server loop
@@ -153,7 +157,7 @@ class TcpBridge(Node):
 
                     buffer += data.decode()
                     while "\n" in buffer:
-                        line, buffer = buffer.split("\n",1)
+                        line, buffer = buffer.split("\n", 1)
                         line = line.strip()
                         if line:
                             self.process_vehicle_line(line)
@@ -167,7 +171,7 @@ class TcpBridge(Node):
                     self.client_socket = None
 
     # Scan callback
-    def scan_callback(self,msg: LaserScan) -> None:
+    def scan_callback(self, msg: LaserScan) -> None:
 
         if msg.angle_increment < 0.0:
             out = LaserScan()
@@ -189,7 +193,7 @@ class TcpBridge(Node):
             if msg.intensities:
                 out.intensities = msg.intensities[::-1]
         else:
-            out = msg  
+            out = msg
 
         self.scan_pub.publish(out)
 
@@ -248,8 +252,10 @@ class TcpBridge(Node):
                 center_velocity=float(payload["c"]) / MILLI_TO_SI,
                 left_velocity=float(payload["l"]) / MILLI_TO_SI,
                 right_velocity=float(payload["r"]) / MILLI_TO_SI,
-                imu_angular_velocity_z=(float(payload.get("tz", 0.0)) * GYRO_SENSITIVITY_FACTOR / MILLI_TO_SI),
-                imu_linear_acceleration_x=(float(payload.get("ax", 0.0)) * ACCELEROMETER_SENSITIVITY_FACTOR / MILLI_TO_SI)
+                imu_angular_velocity_z=(
+                    float(payload.get("tz", 0.0)) * GYRO_SENSITIVITY_FACTOR / MILLI_TO_SI),
+                imu_linear_acceleration_x=(
+                    float(payload.get("ax", 0.0)) * ACCELEROMETER_SENSITIVITY_FACTOR / MILLI_TO_SI)
             )
         except (KeyError, TypeError, ValueError) as exc:
             self.get_logger().warn(f"Ignoring malformed packet: {exc}")
@@ -272,17 +278,18 @@ class TcpBridge(Node):
         odom.pose.pose.orientation.w = (math.cos(yaw * 0.5))
 
         odom.pose.covariance = [0.0] * COVARIANCE_6_SIZE
-        odom.pose.covariance[COVARIANCE_6_INDEX_X]   = ODOM_POSE_COVARIANCE_XY
-        odom.pose.covariance[COVARIANCE_6_INDEX_Y]   = ODOM_POSE_COVARIANCE_XY
+        odom.pose.covariance[COVARIANCE_6_INDEX_X] = ODOM_POSE_COVARIANCE_XY
+        odom.pose.covariance[COVARIANCE_6_INDEX_Y] = ODOM_POSE_COVARIANCE_XY
         odom.pose.covariance[COVARIANCE_6_INDEX_YAW] = ODOM_POSE_COVARIANCE_YAW
 
         odom.twist.twist.linear.x = (data.center_velocity)
 
-        odom.twist.twist.angular.z = ((data.right_velocity - data.left_velocity) / self.wheel_separation)
+        odom.twist.twist.angular.z = (
+            (data.right_velocity - data.left_velocity) / self.wheel_separation)
 
         odom.twist.covariance = [0.0] * COVARIANCE_6_SIZE
-        odom.twist.covariance[COVARIANCE_6_INDEX_X]   = ODOM_TWIST_COVARIANCE_LINEAR_X
-        odom.twist.covariance[COVARIANCE_6_INDEX_Y]   = ODOM_TWIST_COVARIANCE_LINEAR_Y
+        odom.twist.covariance[COVARIANCE_6_INDEX_X] = ODOM_TWIST_COVARIANCE_LINEAR_X
+        odom.twist.covariance[COVARIANCE_6_INDEX_Y] = ODOM_TWIST_COVARIANCE_LINEAR_Y
         odom.twist.covariance[COVARIANCE_6_INDEX_YAW] = ODOM_TWIST_COVARIANCE_ANGULAR_Z
 
         self.odom_pub.publish(odom)
@@ -324,12 +331,13 @@ class TcpBridge(Node):
         else:
             dt = (data.stamp_sec - self.last_joint_state_stamp_sec)
 
-            dt = max(dt,0.0)
+            dt = max(dt, 0.0)
 
         self.last_joint_state_stamp_sec = (data.stamp_sec)
 
         left_wheel_angular_velocity = (data.left_velocity / self.wheel_radius)
-        right_wheel_angular_velocity = (data.right_velocity / self.wheel_radius)
+        right_wheel_angular_velocity = (
+            data.right_velocity / self.wheel_radius)
 
         self.left_wheel_position += (left_wheel_angular_velocity * dt)
 
@@ -341,9 +349,11 @@ class TcpBridge(Node):
 
         joint_state.name = [LEFT_WHEEL_JOINT, RIGHT_WHEEL_JOINT]
 
-        joint_state.position = [self.left_wheel_position, self.right_wheel_position]
+        joint_state.position = [
+            self.left_wheel_position, self.right_wheel_position]
 
-        joint_state.velocity = [left_wheel_angular_velocity, right_wheel_angular_velocity]
+        joint_state.velocity = [
+            left_wheel_angular_velocity, right_wheel_angular_velocity]
 
         self.joint_state_pub.publish(joint_state)
 
@@ -356,6 +366,7 @@ def main(args=None) -> None:
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == "__main__":
     main()
