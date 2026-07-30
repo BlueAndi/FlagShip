@@ -35,7 +35,7 @@ def _launch_setup(context) -> List[LaunchDescriptionEntity]:
     actions = []
 
     tcp_bridge = Node(
-        package='FlagShip',
+        package='flagship',
         executable='tcp_bridge.py',
         name='tcp_bridge',
         output='screen',
@@ -75,7 +75,7 @@ def _launch_setup(context) -> List[LaunchDescriptionEntity]:
 
     if publish_zumo_tf:
         zumo_urdf = os.path.join(
-            get_package_share_directory('FlagShip'),
+            get_package_share_directory('flagship'),
             'resource',
             'Zumo32U4.urdf'
         )
@@ -102,7 +102,7 @@ def _launch_setup(context) -> List[LaunchDescriptionEntity]:
 
 def generate_launch_description() -> LaunchDescription:
     """Create launch description exposing user-configurable arguments."""
-    pkg_share = get_package_share_directory('FlagShip')
+    pkg_share = get_package_share_directory('flagship')
     
     # Define default file paths
     zumo_urdf_default = os.path.join(pkg_share, 'resource', 'Zumo32U4.urdf')
