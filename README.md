@@ -90,7 +90,7 @@ After the first build, only FlagShip needs to be rebuilt when making changes:
 
 ```bash
 cd ~/ros2_ws
-colcon build --packages-select FlagShip
+colcon build --packages-select flagship
 source install/setup.bash
 ```
 
@@ -114,13 +114,13 @@ source install/setup.bash
 Launch the bridge node:
 
 ```bash
-ros2 launch FlagShip bridge_lidar_launch.py
+ros2 launch flagship bridge_lidar_launch.py
 ```
 
 Launch SLAM Toolbox:
 
 ```bash
-ros2 launch FlagShip slam_toolbox_launch.py
+ros2 launch flagship slam_toolbox_launch.py
 ```
 
 Control the robot:
@@ -156,7 +156,7 @@ source install/setup.bash
 Launch the bridge node:
 
 ```bash
-ros2 launch FlagShip bridge_lidar_launch.py
+ros2 launch flagship bridge_lidar_launch.py
 ```
 
 Launch Nav2 with a previously saved map:
