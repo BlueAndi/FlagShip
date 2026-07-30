@@ -19,8 +19,8 @@ from sensor_msgs.msg import Imu, JointState, LaserScan
 LEFT_WHEEL_JOINT = "left_wheel_joint"
 RIGHT_WHEEL_JOINT = "right_wheel_joint"
 # rad/s per digit (LSM6DS33 at ±500 dps range → 17.5 rad/s per digit)
-GYRO_SENSITIVITY_FACTOR = (17.5 * math.pi / 180.0)
-ACCELEROMETER_SENSITIVITY_FACTOR = (0.061 * 9.81)  # m/s² per digit
+GYRO_SENSITIVITY_FACTOR = 17.5 * math.pi / 180.0
+ACCELEROMETER_SENSITIVITY_FACTOR = 0.061 * 9.81  # m/s² per digit
 
 # TCP settings
 TCP_RECEIVE_BUFFER_SIZE = 1024
@@ -285,7 +285,7 @@ class TcpBridge(Node):
         odom.twist.twist.linear.x = data.center_velocity
 
         odom.twist.twist.angular.z = (
-            (data.right_velocity - data.left_velocity) / self.wheel_separation)
+            data.right_velocity - data.left_velocity) / self.wheel_separation
 
         odom.twist.covariance = [0.0] * COVARIANCE_6_SIZE
         odom.twist.covariance[COVARIANCE_6_INDEX_X] = ODOM_TWIST_COVARIANCE_LINEAR_X
