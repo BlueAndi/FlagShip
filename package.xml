@@ -5,7 +5,7 @@
   <version>0.1.0</version>
   <description>ROS2 bridge for DroidControlShip, converting telemetry from RadonUlzer-based Pololu Zumo robots into standard ROS2 messages to enable SLAM and autonomous navigation.</description>
   <maintainer email="web@blue-andi.de">Andreas Merkle</maintainer>
-  <license>Apache-2.0</license>
+  <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <exec_depend>rclpy</exec_depend>
